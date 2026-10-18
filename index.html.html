@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>발표자 뽑기 룰렛</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;900&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Noto Sans KR', sans-serif;
+            background-color: #f0fdf4;
+            overflow-x: hidden;
+        }
+        
+        .wheel-container {
+            position: relative;
+            width: 100%;
+            max-width: 400px;
+            aspect-ratio: 1 / 1;
+            margin: 0 auto;
+            filter: drop-shadow(0 10px 15px rgba(0, 0, 0, 0.1));
+        }
+
+        #canvas {
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            display: block;
+        }
+
+        /* 룰렛 화살표 디자인 */
+        .pointer {
+            position: absolute;
+            top: -15px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 0; 
+            height: 0; 
+            border-left: 20px solid transparent;
+            border-right: 20px solid transparent;
+            border-top: 35px solid #ef4444; /* Tailwind red-500 */
+            z-index: 10;
+            filter: drop-shadow(0 4px 3px rgba(0,0,0,0.2));
+        }
+
+        /* 결과 모달 애니메이션 */
+        @keyframes popIn {
+            0% { transform: scale(0.5); opacity: 0; }
+            80% { transform: scale(1.1); opacity: 1; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        
+        .modal-animate {
+            animation: popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+    </style>
+</head>
+<body class="min-h-screen py-10 px-4 text-gray-800 flex flex-col items-center">
+
+    <div class="w-full max-w-4xl bg-white rounded-3xl shadow-xl overflow-hidden flex flex-col md:flex-row">
+        
+        <!-- 왼쪽: 룰렛 영역 -->
+        <div class="flex-1 p-8 bg-green-50 flex flex-col items-center justify-center border-b md:border-b-0 md:border-r border-green-100">
+            <h1 class="text-3xl font-black text-green-800 mb-2">🎉 발표자 뽑기 🎉</h1>
+            <p class="text-green-600 mb-8 font-medium">한 번 뽑힌 번호는 제외됩니다!</p>
+
+            <div class="wheel-container mb-8">
+                <div class="pointer"></div>
+                <canvas id="canvas" width="600" height="600"></canvas>
+            </div>
+
+            <button id="spinBtn" class="bg-green-600 hover:bg-green-700 text-white text-xl font-bold py-4 px-12 rounded-full shadow-lg transition-transform transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
+                룰렛 돌리기
+            </button>
+        </div>
+
+        <!-- 오른쪽: 상태 표시 영역 -->
+        <div class="flex-1 p-8 flex flex-col bg-white h-auto md:h-[700px] overflow-y-auto">
+            
+            <div class="mb-6">
+                <h2 class="text-xl font-bold text-gray-700 border-b-2 border-green-200 pb-2 mb-4 flex justify-between items-end">
+                    <span>남은 번호</span>
+                    <span id="remainCount" class="text-sm text-green-600 bg-green-100 px-2 py-1 rounded-lg">25명</span>
+                </h2>
+                <div id="remainingList" class="flex flex-wrap gap-2">
+                    <!-- 남은 번호 렌더링 영역 -->
+                </div>
+            </div>
+
+            <div class="mt-auto pt-6">
+                <h2 class="text-xl font-bold text-gray-700 border-b-2 border-red-200 pb-2 mb-4 flex justify-between items-end">
+                    <span>뽑힌 번호 (순서대로)</span>
+                    <span id="selectedCount" class="text-sm text-red-500 bg-red-50 px-2 py-1 rounded-lg">0명</span>
+                </h2>
+                <div id="selectedList" class="flex flex-wrap gap-2 min-h-[50px]">
+                    <span class="text-gray-400 italic text-sm py-2">아직 뽑힌 사람이 없습니다.</span>
+                </div>
+                
+                <div class="mt-6 text-right">
+                    <button id="resetBtn" class="text-sm text-gray-500 hover:text-gray-800 underline transition-colors">
+                        처음부터 다시 시작하기
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="fixed bottom-4 right-4 opacity-5 hover:opacity-100 transition-opacity z-50" title="원하는 번호를 입력하면 무조건 당첨됩니다">
+        <input type="number" id="secretInput" class="w-16 p-2 text-xs border border-gray-300 rounded bg-white shadow-sm text-center focus:outline-none focus:ring-2 focus:ring-green-400" placeholder="🤫">
+    </div>
+
+    <!-- 결과 모달 오버레이 -->
+    <div id="resultModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm hidden items-center justify-center z-50">
+        <div class="bg-white p-10 rounded-3xl shadow-2xl text-center max-w-sm w-full mx-4 modal-content">
+            <p class="text-gray-500 font-bold mb-2">오늘의 발표자는?</p>
+            <div class="text-6xl font-black text-green-600 mb-6 drop-shadow-md">
+                <span id="winnerNumber">15</span>번
+            </div>
+            <button id="closeModalBtn" class="w-full bg-gray-800 hover:bg-gray-900 text-white font-bold py-3 px-6 rounded-xl transition-colors">
+                확인
+            </button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const spinBtn = document.getElementById('spinBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const resultModal = document.getElementById('resultModal');
+        const closeModalBtn = document.getElementById('closeModalBtn');
+        const winnerNumberSpan = document.getElementById('winnerNumber');
+        const remainingListDiv = document.getElementById('remainingList');
+        const selectedListDiv = document.getElementById('selectedList');
+        const remainCountSpan = document.getElementById('remainCount');
+        const selectedCountSpan = document.getElementById('selectedCount');
+
+        const TOTAL_NUMBERS = 25;
+        let numbers = [];
+        let selectedNumbers = [];
+        let colorsMap = {};
+
+        // 파스텔 톤 및 선명한 색상 팔레트
+        const palette = [
+            '#FF9AA2', '#FFB7B2', '#FFDAC1', '#E2F0CB', '#B5EAD7', 
+            '#C7CEEA', '#F1CBFF', '#BDE0FE', '#A2D2FF', '#FFAFCC',
+            '#FFC8DD', '#CDB4DB', '#8EE4AF', '#5CDB95', '#FAD02C',
+            '#F28F3B', '#E85A4F', '#E98074', '#D8C3A5', '#8E8D8A',
+            '#9EE09E', '#F6E8EA', '#F4D8CD', '#6A8EAE', '#577590'
+        ];
+
+        let currentRotation = 0;
+        let isSpinning = false;
+        let animationFrameId;
+
+        const spinDuration = 4500; // 회전 시간 (4.5초)
+        let startRotation = 0;
+        let targetRotation = 0;
+        let spinStartTime = null;
+
+        // Easing 함수 (점점 느려지는 자연스러운 감속 효과)
+        function easeOutQuart(x) {
+            return 1 - Math.pow(1 - x, 4);
+        }
+
+        // 초기화 함수
+        function init() {
+            numbers = Array.from({length: TOTAL_NUMBERS}, (_, i) => i + 1);
+            selectedNumbers = [];
+            
+            // 각 번호에 고유한 색상 할당 (순서가 섞여도 색상 유지)
+            numbers.forEach((num, index) => {
+                colorsMap[num] = palette[index % palette.length];
+            });
+
+            currentRotation = 0;
+            updateUI();
+            drawWheel();
+        }
+
+        function drawWheel() {
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            const radius = canvas.width / 2;
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (numbers.length === 0) {
+                // 남은 사람이 없을 때
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+                ctx.fillStyle = '#e5e7eb'; // gray-200
+                ctx.fill();
+                ctx.fillStyle = '#9ca3af';
+                ctx.font = 'bold 40px Noto Sans KR';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('완료됨', centerX, centerY);
+                return;
+            }
+
+            const arcAngle = (Math.PI * 2) / numbers.length;
+
+            ctx.save();
+            ctx.translate(centerX, centerY);
+            ctx.rotate(currentRotation);
+
+            for (let i = 0; i < numbers.length; i++) {
+                const num = numbers[i];
+                const angle = i * arcAngle;
+
+                // 부채꼴 그리기
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.arc(0, 0, radius, angle, angle + arcAngle);
+                ctx.fillStyle = colorsMap[num];
+                ctx.fill();
+                ctx.lineWidth = 2;
+                ctx.strokeStyle = '#ffffff';
+                ctx.stroke();
+
+                // 텍스트 그리기
+                ctx.save();
+                ctx.rotate(angle + arcAngle / 2);
+                ctx.translate(radius * 0.75, 0); // 중심에서 75% 떨어진 곳에 텍스트
+                
+                // 텍스트 회전 보정 (똑바로 보이게)
+                ctx.rotate(Math.PI / 2);
+                
+                ctx.fillStyle = '#333333';
+                ctx.font = `bold ${numbers.length > 15 ? '32px' : '48px'} Noto Sans KR`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                
+                // 텍스트 배경(흰색 테두리)으로 가독성 향상
+                ctx.lineWidth = 4;
+                ctx.strokeStyle = 'white';
+                ctx.strokeText(num, 0, 0);
+                ctx.fillText(num, 0, 0);
+                
+                ctx.restore();
+            }
+            
+            ctx.restore(); // 전체 룰렛 회전 상태 복구
+            
+            // 중앙의 핀(Thumbtack) 그리기 
+            ctx.save();
+            ctx.translate(centerX, centerY);
+            
+            // 1. 핀 전체 그림자 (원근감)
+            ctx.beginPath();
+            ctx.arc(0, 0, radius * 0.12, 0, Math.PI * 2);
+            ctx.shadowColor = 'rgba(0,0,0,0.5)';
+            ctx.shadowBlur = 15;
+            ctx.shadowOffsetY = 8;
+            ctx.fillStyle = '#ffffff';
+            ctx.fill();
+            
+            // 2. 핀 바깥쪽 금속 질감 테두리
+            ctx.shadowColor = 'transparent';
+            ctx.beginPath();
+            ctx.arc(0, 0, radius * 0.12, 0, Math.PI * 2);
+            const metalGrad = ctx.createLinearGradient(-radius*0.1, -radius*0.1, radius*0.1, radius*0.1);
+            metalGrad.addColorStop(0, '#f8fafc');
+            metalGrad.addColorStop(0.5, '#94a3b8');
+            metalGrad.addColorStop(1, '#475569');
+            ctx.fillStyle = metalGrad;
+            ctx.fill();
+            
+            // 3. 핀 안쪽 붉은색 머리 부분 (그라데이션으로 볼륨감 표현)
+            ctx.beginPath();
+            ctx.arc(0, 0, radius * 0.07, 0, Math.PI * 2);
+            const redGrad = ctx.createRadialGradient(-radius*0.02, -radius*0.02, radius*0.01, 0, 0, radius*0.07);
+            redGrad.addColorStop(0, '#fca5a5');
+            redGrad.addColorStop(0.7, '#ef4444');
+            redGrad.addColorStop(1, '#991b1b');
+            ctx.fillStyle = redGrad;
+            ctx.fill();
+            
+            // 4. 핀 윗부분 하이라이트 (빛 반사 효과)
+            ctx.beginPath();
+            ctx.arc(-radius*0.025, -radius*0.025, radius*0.02, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(255,255,255,0.7)';
+            ctx.fill();
+            
+            ctx.restore();
+        }
+
+        function updateUI() {
+            // 버튼 상태
+            spinBtn.disabled = numbers.length === 0 || isSpinning;
+            if(numbers.length === 0) {
+                spinBtn.innerText = "모두 뽑혔습니다!";
+            } else {
+                spinBtn.innerText = isSpinning ? "돌아가는 중..." : "룰렛 돌리기";
+            }
+
+            // 남은 번호 리스트 렌더링
+            remainCountSpan.innerText = `${numbers.length}명`;
+            remainingListDiv.innerHTML = '';
+            numbers.forEach(num => {
+                const span = document.createElement('span');
+                span.className = 'w-10 h-10 flex items-center justify-center bg-gray-100 rounded-lg text-gray-700 font-bold shadow-sm border border-gray-200';
+                span.innerText = num;
+                // 해당 번호의 룰렛 색상을 보더 색상으로 살짝 주기
+                span.style.borderBottomWidth = '4px';
+                span.style.borderBottomColor = colorsMap[num];
+                remainingListDiv.appendChild(span);
+            });
+
+            // 뽑힌 번호 리스트 렌더링
+            selectedCountSpan.innerText = `${selectedNumbers.length}명`;
+            selectedListDiv.innerHTML = '';
+            if (selectedNumbers.length === 0) {
+                selectedListDiv.innerHTML = '<span class="text-gray-400 italic text-sm py-2">아직 뽑힌 사람이 없습니다.</span>';
+            } else {
+                selectedNumbers.forEach((num, idx) => {
+                    const span = document.createElement('span');
+                    span.className = 'w-10 h-10 flex items-center justify-center bg-red-500 text-white rounded-lg font-bold shadow-md transform transition-transform hover:scale-110';
+                    span.innerText = num;
+                    selectedListDiv.appendChild(span);
+                });
+            }
+        }
+
+        function spin() {
+            if (isSpinning || numbers.length === 0) return;
+            
+            isSpinning = true;
+            updateUI();
+            
+            // 1. 비밀 입력칸 확인 및 조작 인덱스 세팅
+            const secretInput = document.getElementById('secretInput');
+            const riggedValue = secretInput ? parseInt(secretInput.value) : NaN;
+            let targetIndex = -1;
+
+            // 입력된 값이 현재 남은 번호 중에 있는지 확인
+            if (!isNaN(riggedValue) && numbers.includes(riggedValue)) {
+                targetIndex = numbers.indexOf(riggedValue);
+                if (secretInput) secretInput.value = ''; // 한 번 사용 후 초기화하여 들키지 않게 함
+            } else {
+                // 조작이 없으면 완전 랜덤으로 선택
+                targetIndex = Math.floor(Math.random() * numbers.length);
+            }
+
+            // 2. 당첨될 조각의 중앙 각도 계산
+            const arcAngle = (Math.PI * 2) / numbers.length;
+            // 중앙에서 약간 벗어나게 랜덤성 부여 (너무 정중앙에 멈추면 인위적이므로)
+            const randomOffset = (Math.random() * 0.6 - 0.3) * arcAngle; 
+            const targetAngleAtTop = targetIndex * arcAngle + (arcAngle / 2) + randomOffset;
+
+            // 3. 목표로 하는 최종 회전 각도 계산
+            // 화살표가 있는 270도(1.5PI) 위치에 목표 각도가 오게 역산
+            let finalRotation = (Math.PI * 1.5) - targetAngleAtTop;
+            
+            // 최소 5바퀴 ~ 8바퀴 랜덤으로 더 돌기
+            const rotations = Math.floor(Math.random() * 4 + 5) * Math.PI * 2; 
+            
+            startRotation = currentRotation; 
+            
+            // 현재 캔버스 각도와 최종 각도의 차이 구하기
+            let currentNormalized = startRotation % (Math.PI * 2);
+            let finalNormalized = finalRotation % (Math.PI * 2);
+            if (finalNormalized < 0) finalNormalized += Math.PI * 2;
+            
+            let rotationDiff = finalNormalized - currentNormalized;
+            if (rotationDiff < 0) rotationDiff += Math.PI * 2;
+
+            // 최종 타겟 = 시작 + 기본 바퀴수 + 각도 차이
+            targetRotation = startRotation + rotations + rotationDiff;
+            
+            spinStartTime = null;
+            animationFrameId = requestAnimationFrame(animate);
+        }
+
+        function animate(timestamp) {
+            if (!spinStartTime) spinStartTime = timestamp;
+            const elapsed = timestamp - spinStartTime;
+            let progress = elapsed / spinDuration;
+
+            if (progress >= 1) {
+                progress = 1;
+                isSpinning = false;
+            }
+
+            // Easing 함수를 통과시켜 속도가 부드럽게 줄어들게 함
+            const easeProgress = easeOutQuart(progress);
+            currentRotation = startRotation + (targetRotation - startRotation) * easeProgress;
+
+            drawWheel();
+
+            if (progress < 1) {
+                animationFrameId = requestAnimationFrame(animate);
+            } else {
+                cancelAnimationFrame(animationFrameId);
+                determineWinner(); // 물리적 오차가 없으므로 의도한 번호가 정확히 호출됨
+            }
+        }
+
+        function determineWinner() {
+            // 화살표가 가리키는 위치는 캔버스 최상단 (-90도 = 270도)
+            // 캔버스의 현재 회전 각도를 바탕으로 어느 인덱스가 최상단에 있는지 계산
+            
+            // 정규화된 현재 회전 각도 (0 ~ 2PI)
+            const normalizedRotation = currentRotation % (Math.PI * 2);
+            
+            // 최상단은 3*PI/2 위치. 회전 방향이 시계방향이므로, 
+            // 현재 회전된 상태에서 화살표(상단)가 가리키는 조각의 각도 오프셋:
+            let angleAtTop = (Math.PI * 1.5 - normalizedRotation) % (Math.PI * 2);
+            if (angleAtTop < 0) {
+                angleAtTop += Math.PI * 2;
+            }
+
+            const arcAngle = (Math.PI * 2) / numbers.length;
+            const winningIndex = Math.floor(angleAtTop / arcAngle);
+            const winner = numbers[winningIndex];
+
+            showResult(winner, winningIndex);
+        }
+
+        let winSynth;
+        function initAudio() {
+            if (!winSynth) {
+                // 신디사이저 생성 (맑고 통통 튀는 소리)
+                winSynth = new Tone.PolySynth(Tone.Synth, {
+                    oscillator: { type: 'triangle' },
+                    envelope: { attack: 0.02, decay: 0.1, sustain: 0.1, release: 1 }
+                }).toDestination();
+                winSynth.volume.value = -3; // 볼륨 약간 줄임
+            }
+        }
+
+        function playWinSound() {
+            if(winSynth) {
+                const now = Tone.now();
+                // 뿅 띵! 하는 경쾌한 아르페지오 소리 재생
+                winSynth.triggerAttackRelease("C5", "16n", now);
+                winSynth.triggerAttackRelease("E5", "16n", now + 0.1);
+                winSynth.triggerAttackRelease("G5", "16n", now + 0.2);
+                winSynth.triggerAttackRelease("C6", "2n", now + 0.35);
+            }
+        }
+
+        function showResult(winner, index) {
+            // 모달 업데이트 및 표시
+            winnerNumberSpan.innerText = winner;
+            const modalContent = resultModal.querySelector('.modal-content');
+            modalContent.classList.remove('modal-animate');
+            
+            // 리플로우 강제 유발 후 애니메이션 클래스 재추가
+            void resultModal.offsetWidth; 
+            
+            resultModal.style.display = 'flex';
+            modalContent.classList.add('modal-animate');
+
+            // 당첨 효과음 재생
+            playWinSound();
+
+            // 리스트 업데이트 로직은 모달을 닫을 때 혹은 즉시 수행
+            // 학생이 확인 후 삭제되는 것을 인지하기 쉽도록 즉시 수행합니다.
+            numbers.splice(index, 1);
+            selectedNumbers.push(winner);
+            
+            updateUI();
+            drawWheel();
+        }
+
+        // 이벤트 리스너 등록
+        spinBtn.addEventListener('click', async () => {
+            // 브라우저 정책 상 사용자의 제스처(클릭)가 있을 때 오디오 컨텍스트를 시작해야 함
+            await Tone.start();
+            initAudio();
+            spin();
+        });
+        
+        closeModalBtn.addEventListener('click', () => {
+            resultModal.style.display = 'none';
+        });
+
+        resetBtn.addEventListener('click', () => {
+            if(confirm('정말 처음부터 다시 시작하시겠습니까? (뽑힌 내역이 초기화됩니다)')) {
+                init();
+            }
+        });
+
+        // 초기화 실행
+        init();
+
+    </script>
+</body>
+</html>
